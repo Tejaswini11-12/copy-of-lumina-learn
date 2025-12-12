@@ -4,10 +4,11 @@ import {
   Clock, Calendar, TrendingUp, Zap, BookOpen, ChevronRight, 
   MoreHorizontal, Star, Award, Target, Settings, Shield, LogOut,
   Bell, Layout, CheckCircle, Circle, ArrowRight, Lightbulb, PlayCircle, User, Key, Save,
-  ArrowUp, X, Lock, Mail, Globe, AlertTriangle, Loader2, Edit2, Plus, Check, Send, Sparkles
+  ArrowUp, X, Lock, Mail, Globe, AlertTriangle, Loader2, Edit2, Plus, Check, Send, Sparkles,
+  Flame, BarChart2, Activity as ActivityIcon
 } from 'lucide-react';
 import { ProfileTab, View } from '../types';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { auth, db } from '../firebaseConfig';
 import { GoogleGenAI, Chat, GenerateContentResponse } from "@google/genai";
 import { 
@@ -25,7 +26,8 @@ import {
   getDoc, 
   setDoc, 
   updateDoc, 
-  deleteDoc 
+  deleteDoc,
+  onSnapshot
 } from 'firebase/firestore';
 import { Activity } from '../App';
 
@@ -586,93 +588,183 @@ interface ProgressViewProps {
 }
 
 export const ProgressView: React.FC<ProgressViewProps> = ({ onNavigate }) => {
-  const data = [
-    { name: 'Mon', score: 60 },
-    { name: 'Tue', score: 75 },
-    { name: 'Wed', score: 40 },
-    { name: 'Thu', score: 85 },
-    { name: 'Fri', score: 65 },
-    { name: 'Sat', score: 30 },
-    { name: 'Sun', score: 90 },
-  ];
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [insight, setInsight] = useState('');
 
-  const trendData = [
-    { name: 'Mon', v: 1 },
-    { name: 'Tue', v: 2 },
-    { name: 'Wed', v: 1 },
-    { name: 'Thu', v: 3 },
-    { name: 'Fri', v: 4 },
-    { name: 'Sat', v: 5 },
-    { name: 'Sun', v: 6 },
-  ];
+  // Default "Starter Pack" stats for new users
+  const defaultStats = {
+    streak: 1,
+    sessionsThisWeek: 3,
+    totalTime: 45,
+    bestDay: 'Today',
+    dailyAvg: 15,
+    weeklyScores: [
+      { name: 'Mon', score: 0 },
+      { name: 'Tue', score: 30 },
+      { name: 'Wed', score: 45 },
+      { name: 'Thu', score: 60 },
+      { name: 'Fri', score: 0 },
+      { name: 'Sat', score: 0 },
+      { name: 'Sun', score: 0 },
+    ],
+    habitTrend: [
+      { name: 'Mon', v: 1 },
+      { name: 'Tue', v: 2 },
+      { name: 'Wed', v: 4 },
+      { name: 'Thu', v: 3 },
+      { name: 'Fri', v: 5 },
+      { name: 'Sat', v: 2 },
+      { name: 'Sun', v: 6 },
+    ],
+    improvements: [
+      { title: 'Momentum Builder', sub: 'Started a new learning streak.', icon: 'Zap', color: 'bg-yellow-100 text-yellow-600' },
+      { title: 'Curious Mind', sub: 'Explored 2 new topics.', icon: 'BookOpen', color: 'bg-blue-100 text-blue-600' },
+    ],
+    recentLogs: [
+      { day: 'Today', title: 'Session started', bg: 'bg-mint-50' },
+    ]
+  };
+
+  useEffect(() => {
+    // 1. Determine Insight based on time of day
+    const hour = new Date().getHours();
+    let msg = "Keep learning!";
+    if (hour < 12) msg = "You're a morning learning machine! ☀️";
+    else if (hour < 18) msg = "Afternoon power sessions work best for you. ⚡";
+    else msg = "Night owl mode activated. 🦉";
+    setInsight(msg);
+
+    // 2. Fetch Stats
+    if (auth.currentUser) {
+      const unsubscribe = onSnapshot(doc(db, 'users', auth.currentUser.uid), (docSnap) => {
+        if (docSnap.exists() && docSnap.data().stats) {
+          setStats(docSnap.data().stats);
+        } else {
+          // If no stats, use defaults (and maybe save them later if needed)
+          setStats(defaultStats);
+        }
+        setLoading(false);
+      });
+      return () => unsubscribe();
+    } else {
+      setStats(defaultStats);
+      setLoading(false);
+    }
+  }, []);
+
+  if (loading || !stats) {
+    return (
+      <div className="flex items-center justify-center h-64 text-mint-400">
+        <Loader2 className="animate-spin" size={32} />
+      </div>
+    );
+  }
+
+  // Icons map for improvements
+  const getIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'Zap': return <Zap size={20} />;
+      case 'BookOpen': return <BookOpen size={20} />;
+      case 'Target': return <Target size={20} />;
+      case 'Crown': return <Award size={20} />;
+      default: return <Star size={20} />;
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in duration-500">
       <div className="space-y-6">
         <SectionTitle title="Learning Consistency" subtitle='"Consistency is what transforms average into excellence."' />
         
-        <Card className="p-6 bg-gray-50 border-none">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center text-orange-500 text-2xl shadow-sm">
-              🔥
+        {/* Streak Card */}
+        <Card className="p-6 bg-white border-none shadow-sm relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Flame size={120} className="text-orange-300" />
+          </div>
+          <div className="flex items-center gap-5 relative z-10">
+            <div className="w-16 h-16 rounded-full bg-orange-50 flex items-center justify-center text-orange-500 shadow-sm border border-orange-100">
+              <Flame size={32} className="animate-pulse" fill="currentColor" />
             </div>
             <div>
-              <h3 className="font-bold text-xl text-gray-800">Study streak: 4 days</h3>
-              <p className="text-gray-500 text-sm">Keep it up to earn a badge!</p>
+              <h3 className="font-bold text-2xl text-gray-800 flex items-center gap-2">
+                {stats.streak} Day Streak
+              </h3>
+              <p className="text-gray-500 text-sm">You're on fire! Keep it up to earn a badge.</p>
             </div>
           </div>
         </Card>
 
+        {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-4">
-          <Card className="p-6 bg-mint-50/50 border-mint-100">
+          <Card className="p-6 bg-mint-50/50 border-mint-100 flex flex-col justify-between">
              <div className="flex items-start gap-3 mb-4">
                <div className="p-2 bg-white rounded-lg text-mint-500 shadow-sm"><Calendar size={20} /></div>
                <div>
-                 <h2 className="text-2xl font-bold text-gray-800">8</h2>
-                 <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-1">Sessions This Week</p>
+                 <h2 className="text-3xl font-bold text-gray-800">{stats.sessionsThisWeek}</h2>
+                 <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-1 font-semibold">Sessions This Week</p>
                </div>
              </div>
-             <div className="space-y-1 pt-2 border-t border-mint-200/50">
+             <div className="space-y-1.5 pt-3 border-t border-mint-200/50">
                <div className="flex justify-between text-xs text-gray-600">
                  <span>Total Time</span>
-                 <span className="font-semibold">120m</span>
+                 <span className="font-semibold text-mint-700">{stats.totalTime}m</span>
                </div>
                <div className="flex justify-between text-xs text-gray-600">
                  <span>Best Day</span>
-                 <span className="font-semibold">Thu</span>
+                 <span className="font-semibold text-mint-700">{stats.bestDay}</span>
                </div>
                <div className="flex justify-between text-xs text-gray-600">
                  <span>Daily Avg</span>
-                 <span className="font-semibold">17m</span>
+                 <span className="font-semibold text-mint-700">{stats.dailyAvg}m</span>
                </div>
              </div>
           </Card>
-          <Card className="p-6 bg-blue-50/50 border-blue-100 overflow-hidden relative">
+          
+          <Card className="p-6 bg-blue-50/50 border-blue-100 overflow-hidden relative flex flex-col">
              <div className="flex items-start gap-3 mb-2 relative z-10">
                <div className="p-2 bg-white rounded-lg text-blue-500 shadow-sm"><TrendingUp size={20} /></div>
                <div>
                  <h2 className="text-lg font-bold text-gray-800 flex items-center gap-1">Growing 🌱</h2>
-                 <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-1">You're building a habit</p>
+                 <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-1 font-semibold">Habit Strength</p>
                </div>
              </div>
-             <div className="h-24 w-full mt-2 -mb-2">
+             <div className="flex-1 w-full mt-2 min-h-[80px]">
                <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={trendData}>
-                    <Bar dataKey="v" fill="#bfdbfe" radius={[2,2,0,0]} />
+                 <BarChart data={stats.habitTrend}>
+                    <Bar dataKey="v" fill="#93C5FD" radius={[3,3,0,0]} animationDuration={1500}>
+                      {stats.habitTrend.map((entry: any, index: number) => (
+                        <Cell key={`cell-${index}`} fillOpacity={0.6 + (index * 0.1)} />
+                      ))}
+                    </Bar>
                  </BarChart>
                </ResponsiveContainer>
              </div>
           </Card>
         </div>
 
-        <div className="h-64 mt-8">
-           <ResponsiveContainer width="100%" height="100%">
-             <BarChart data={data}>
-               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#9CA3AF'}} />
-               <Tooltip cursor={{fill: '#F3F4F6'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'}} />
-               <Bar dataKey="score" radius={[4, 4, 4, 4]}>
-                 {data.map((entry, index) => (
-                   <Cell key={`cell-${index}`} fill={entry.score > 80 ? '#A9CEA2' : '#E5E7EB'} />
+        {/* Weekly Activity Chart */}
+        <div className="h-64 mt-4 bg-white rounded-3xl p-4 border border-gray-100 shadow-sm">
+           <div className="mb-4 flex justify-between items-center px-2">
+              <h4 className="text-sm font-semibold text-gray-700">Weekly Performance</h4>
+              <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">Last 7 Days</span>
+           </div>
+           <ResponsiveContainer width="100%" height="85%">
+             <BarChart data={stats.weeklyScores}>
+               <XAxis 
+                 dataKey="name" 
+                 axisLine={false} 
+                 tickLine={false} 
+                 tick={{fontSize: 11, fill: '#9CA3AF'}} 
+                 dy={10}
+               />
+               <Tooltip 
+                 cursor={{fill: '#F3F4F6', radius: 4}} 
+                 contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', fontSize: '12px'}} 
+               />
+               <Bar dataKey="score" radius={[6, 6, 6, 6]} barSize={32} animationDuration={1000}>
+                 {stats.weeklyScores.map((entry: any, index: number) => (
+                   <Cell key={`cell-${index}`} fill={entry.score > 70 ? '#A9CEA2' : '#E5E7EB'} />
                  ))}
                </Bar>
              </BarChart>
@@ -683,52 +775,53 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ onNavigate }) => {
       <div className="space-y-6">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-semibold text-xl text-gray-800">What's Improving</h3>
+          <span className="text-xs font-medium text-mint-600 bg-mint-50 px-3 py-1 rounded-full animate-pulse">Live Analysis</span>
         </div>
 
-        <Card className="p-6 space-y-6">
-           {[
-             { title: 'Faster problem-solving', sub: 'Solving questions 15% faster on average.', icon: <Zap size={20} />, color: 'bg-yellow-100 text-yellow-600' },
-             { title: 'Better accuracy in weak topics', sub: 'Calculus accuracy up by 20%.', icon: <Target size={20} />, color: 'bg-mint-100 text-mint-600' },
-             { title: 'Improved focus', sub: 'Maintained focus in short sessions.', icon: <Clock size={20} />, color: 'bg-blue-100 text-blue-600' },
-           ].map((item, i) => (
-             <div key={i} className="flex gap-4">
-               <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${item.color}`}>
-                 {item.icon}
+        <Card className="p-6 space-y-5">
+           {stats.improvements && stats.improvements.map((item: any, i: number) => (
+             <div key={i} className="flex gap-4 group cursor-default">
+               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${item.color} group-hover:scale-110 transition-transform duration-300 shadow-sm`}>
+                 {getIcon(item.icon)}
                </div>
                <div>
-                 <h4 className="font-semibold text-gray-800">{item.title}</h4>
+                 <h4 className="font-semibold text-gray-800 group-hover:text-mint-600 transition-colors">{item.title}</h4>
                  <p className="text-xs text-gray-500 mt-1">{item.sub}</p>
                </div>
              </div>
            ))}
-           <div className="pt-4 mt-2">
-             <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 flex items-center gap-2">
-               Insight: You learn best in the morning ☀️
+           <div className="pt-4 mt-2 border-t border-gray-50">
+             <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl p-4 text-xs text-gray-700 flex items-center gap-3 border border-yellow-100/50 shadow-sm">
+               <Lightbulb className="text-yellow-500 shrink-0" size={18} />
+               <span><strong>Insight:</strong> {insight}</span>
              </div>
            </div>
         </Card>
 
         <div className="mt-8">
           <h3 className="font-semibold text-xl text-gray-800 mb-4">Recent Progress</h3>
-          <div className="grid grid-cols-3 gap-4">
-             {[
-               { day: 'Yesterday', title: 'Practice accuracy improved', bg: 'bg-gray-50' },
-               { day: '2 days ago', title: 'Weak topic revised', bg: 'bg-gray-50' },
-               { day: '3 days ago', title: 'Short session completed', bg: 'bg-gray-50' }
-             ].map((item, i) => (
-               <div key={i} className={`${item.bg} p-4 rounded-2xl`}>
-                 <p className="text-[10px] text-gray-400 mb-1">{item.day}</p>
-                 <p className="text-sm font-semibold text-gray-800 leading-snug">{item.title}</p>
+          <div className="grid grid-cols-1 gap-3">
+             {stats.recentLogs && stats.recentLogs.map((item: any, i: number) => (
+               <div key={i} className={`${item.bg || 'bg-gray-50'} p-4 rounded-2xl flex items-center justify-between group hover:shadow-sm transition-all`}>
+                 <div>
+                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">{item.day}</p>
+                    <p className="text-sm font-semibold text-gray-800 leading-snug">{item.title}</p>
+                 </div>
+                 <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-300 group-hover:text-mint-500 transition-colors">
+                    <CheckCircle size={16} />
+                 </div>
                </div>
              ))}
           </div>
         </div>
 
         <Button 
-          className="w-full py-4 text-lg mt-4" 
-          onClick={() => onNavigate(View.DASHBOARD)}
+          className="w-full py-4 text-lg mt-4 bg-mint-300 hover:bg-mint-400 shadow-mint-200 shadow-lg hover:shadow-xl transition-all active:scale-[0.98]" 
+          onClick={() => onNavigate(View.LUMA_LEARN)}
         >
-          Continue Learning
+          <div className="flex items-center gap-2">
+            Continue Learning <ArrowRight size={20} />
+          </div>
         </Button>
       </div>
     </div>
