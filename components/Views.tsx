@@ -17,7 +17,8 @@ import {
   EmailAuthProvider, 
   deleteUser,
   User as FirebaseUser,
-  verifyBeforeUpdateEmail
+  verifyBeforeUpdateEmail,
+  updateProfile
 } from 'firebase/auth';
 import { 
   doc, 
@@ -849,14 +850,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
   const [displayName, setDisplayName] = useState('');
   const [educationLevel, setEducationLevel] = useState('');
   const [subjects, setSubjects] = useState<string[]>([]);
+  const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
   
-  // Study Goals state
-  const [studyGoals, setStudyGoals] = useState({
-    improveUnderstanding: true,
-    stayConsistent: false,
-    shortSessions: true
-  });
-
   // Temp states for modals
   const [tempName, setTempName] = useState('');
   const [tempEducationLevel, setTempEducationLevel] = useState('');
@@ -896,49 +891,27 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.region) setRegion(data.region);
-            if (data.profile?.name) setDisplayName(data.profile.name);
             
-            // Safe extraction of nested objects
-            const learningContext = data.learningContext || {};
-            if (learningContext.educationLevel) setEducationLevel(learningContext.educationLevel);
-            // Robust array check
-            if (Array.isArray(learningContext.subjects)) {
-              setSubjects(learningContext.subjects);
+            const profile = data.profile || {};
+            if (profile.displayName) setDisplayName(profile.displayName);
+            
+            // Nested profile structure for learning context
+            if (profile.learningContext) {
+               setEducationLevel(profile.learningContext.educationLevel || '');
+               setSubjects(profile.learningContext.primarySubjects || []);
+            } else if (data.learningContext) {
+               // Fallback to legacy path if present
+               setEducationLevel(data.learningContext.educationLevel || '');
+               setSubjects(data.learningContext.subjects || []);
             }
             
-            // Load Study Goals
-            if (data.preferences?.studyGoals) {
-               setStudyGoals(prev => ({...prev, ...data.preferences.studyGoals}));
+            // Nested profile structure for study goals
+            if (profile.studyGoals && Array.isArray(profile.studyGoals.goals)) {
+               setSelectedGoals(profile.studyGoals.goals);
+            } else if (data.preferences?.studyGoals) {
+                // Fallback map legacy preferences object to array if needed, or leave blank if mismatch
+                // Current requirement is specific path: users/{uid}/profile/studyGoals
             }
-          } else {
-             // Create default doc if missing to ensure future consistency
-             // Only if we are sure it doesn't exist
-             const defaultData = { 
-               region: 'English (US)', 
-               googleLinked: false,
-               profile: { name: currentUser.displayName || 'Student' },
-               learningContext: { 
-                 educationLevel: 'Undergraduate University Student',
-                 subjects: ['Computer Science', 'Data Analysis', 'Design']
-               },
-               preferences: {
-                 studyGoals: {
-                   improveUnderstanding: true,
-                   stayConsistent: false,
-                   shortSessions: true
-                 }
-               }
-             };
-             // Try to set defaults, but don't crash if offline
-             try {
-               await setDoc(userRef, defaultData, { merge: true });
-               // Update local state to match defaults
-               setDisplayName(defaultData.profile.name);
-               setEducationLevel(defaultData.learningContext.educationLevel);
-               setSubjects(defaultData.learningContext.subjects);
-             } catch (e) {
-               console.warn("Could not set default user data (offline?)", e);
-             }
           }
         } catch (err) {
           console.error("Error fetching user data:", err);
@@ -975,14 +948,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
 
     try {
       if (currentUser && newEmail !== email) {
-        // Trigger verification flow instead of direct update
         await verifyBeforeUpdateEmail(currentUser, newEmail);
-        
-        // UI Feedback ONLY - Verification Sent Mode
         setVerificationSent(true);
-        
-        // Note: We do NOT update Firestore here or close the modal immediately.
-        // The email is only updated in Auth after the user clicks the verification link.
       } else {
         setActiveModal('NONE');
       }
@@ -1000,17 +967,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
     }
   };
   
-  const handleToggleGoal = async (key: keyof typeof studyGoals) => {
-    const newVal = !studyGoals[key];
-    const newState = { ...studyGoals, [key]: newVal };
-    setStudyGoals(newState);
+  const handleToggleGoal = async (goalText: string) => {
+    let newGoals = [...selectedGoals];
+    if (newGoals.includes(goalText)) {
+      newGoals = newGoals.filter(g => g !== goalText);
+    } else {
+      newGoals.push(goalText);
+    }
+    
+    setSelectedGoals(newGoals); // Optimistic update
     
     if (currentUser) {
       const userRef = doc(db, 'users', currentUser.uid);
       try {
-        // Merge this specific preference update
         await setDoc(userRef, {
-           preferences: { studyGoals: { [key]: newVal } }
+           profile: { studyGoals: { goals: newGoals } }
         }, { merge: true });
       } catch (err) {
         console.error("Error saving goal:", err);
@@ -1032,19 +1003,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
 
     try {
       if (currentUser && currentUser.email) {
-        // Re-authenticate
         const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
         await reauthenticateWithCredential(currentUser, credential);
-        
-        // Update
         await updatePassword(currentUser, newPassword);
         
-        // Save timestamp
         const userRef = doc(db, 'users', currentUser.uid);
         await setDoc(userRef, { passwordLastChanged: new Date().toISOString() }, { merge: true });
         
         setActiveModal('NONE');
-        // Reset fields
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -1063,24 +1029,24 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
 
   const handleDeleteAccount = async () => {
     setLoading(true);
+    setError(null);
     try {
       if (currentUser) {
-        // Delete data first
+        // Delete data first (best effort)
         const userRef = doc(db, 'users', currentUser.uid);
         await deleteDoc(userRef);
         // Delete auth
         await deleteUser(currentUser);
-        onLogout(); // Redirects to login usually
+        onLogout(); 
       }
     } catch (err: any) {
       console.error(err);
+      setLoading(false); // Ensure loading stops on error
       if (err.code === 'auth/requires-recent-login') {
-        setError("For security, please log out and log in again to delete your account.");
+        setError("Please log in again to confirm account deletion.");
       } else {
         setError("Failed to delete account. Try again.");
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1090,49 +1056,64 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
       return;
     }
     
-    // Optimistic Update
-    setDisplayName(tempName);
-    setActiveModal('NONE');
-    setLoading(false);
-
-    // Background Save
-    if (currentUser) {
-      const userRef = doc(db, 'users', currentUser.uid);
-      setDoc(userRef, { profile: { name: tempName } }, { merge: true })
-        .catch(err => console.error("Background save failed:", err));
+    setLoading(true);
+    
+    try {
+      if (currentUser) {
+        // Update Auth Profile
+        await updateProfile(currentUser, { displayName: tempName });
+        // Update Firestore Document
+        const userRef = doc(db, 'users', currentUser.uid);
+        await setDoc(userRef, { profile: { displayName: tempName } }, { merge: true });
+        
+        setDisplayName(tempName);
+        setActiveModal('NONE');
+      }
+    } catch (err) {
+      console.error("Save failed:", err);
+      setError("Failed to save name. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSaveEducation = async () => {
     const level = tempEducationLevel || 'Undergraduate University Student';
     
-    // Optimistic Update
-    setEducationLevel(level);
-    setActiveModal('NONE');
-    setLoading(false);
-
-    // Background Save
-    if (currentUser) {
-       const userRef = doc(db, 'users', currentUser.uid);
-       setDoc(userRef, { learningContext: { educationLevel: level } }, { merge: true })
-        .catch(err => console.error("Background save failed:", err));
+    setLoading(true);
+    setEducationLevel(level); // Optimistic Update
+    
+    try {
+      if (currentUser) {
+         const userRef = doc(db, 'users', currentUser.uid);
+         await setDoc(userRef, { profile: { learningContext: { educationLevel: level } } }, { merge: true });
+         setActiveModal('NONE');
+      }
+    } catch (err) {
+        console.error("Background save failed:", err);
+        setError("Failed to save. Try again.");
+    } finally {
+        setLoading(false);
     }
   };
 
   const handleSaveSubjects = async () => {
     const subs = tempSubjects || [];
     
-    // Optimistic Update
-    setSubjects(subs);
-    setActiveModal('NONE');
-    setLoading(false);
-
-    // Background Save
-    if (currentUser) {
-        const userRef = doc(db, 'users', currentUser.uid);
-        // Ensure robust saving of the array
-        setDoc(userRef, { learningContext: { subjects: subs } }, { merge: true })
-          .catch(err => console.error("Background save failed:", err));
+    setLoading(true);
+    setSubjects(subs); // Optimistic Update
+    
+    try {
+      if (currentUser) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          await setDoc(userRef, { profile: { learningContext: { primarySubjects: subs } } }, { merge: true });
+          setActiveModal('NONE');
+      }
+    } catch (err) {
+        console.error("Background save failed:", err);
+        setError("Failed to save. Try again.");
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -1249,16 +1230,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
                   <p className="text-xs text-gray-400 mb-4">Select goals to help our AI tailor your daily lesson plans.</p>
                   <div className="space-y-3">
                     {[
-                      { key: 'improveUnderstanding', text: 'Improve understanding' },
-                      { key: 'stayConsistent', text: 'Stay consistent' },
-                      { key: 'shortSessions', text: 'Learn in short sessions' },
-                    ].map((item, i) => {
-                      const isSelected = studyGoals[item.key as keyof typeof studyGoals];
+                      'Improve understanding',
+                      'Stay consistent',
+                      'Learn in short sessions'
+                    ].map((goalText, i) => {
+                      const isSelected = selectedGoals.includes(goalText);
                       return (
                         <div 
                           key={i} 
                           className="flex items-center gap-3 cursor-pointer group"
-                          onClick={() => handleToggleGoal(item.key as keyof typeof studyGoals)}
+                          onClick={() => handleToggleGoal(goalText)}
                         >
                           <div className={`transition-colors ${isSelected ? 'text-mint-400' : 'text-gray-300 group-hover:text-gray-400'}`}>
                             {isSelected 
@@ -1267,7 +1248,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
                             }
                           </div>
                           <span className={`text-sm transition-colors ${isSelected ? 'text-gray-900 font-medium' : 'text-gray-700'}`}>
-                            {item.text}
+                            {goalText}
                           </span>
                         </div>
                       );
@@ -1573,7 +1554,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
             <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-2">
                <AlertTriangle size={32} />
             </div>
-            <p className="text-gray-600">Are you sure you want to delete your account? This action cannot be undone and all your data will be lost.</p>
+            <p className="text-gray-600">Are you sure you want to permanently delete your account? This action cannot be undone.</p>
             {error && <p className="text-red-500 text-xs px-1">{error}</p>}
          </div>
          <div className="flex gap-3">
@@ -1621,12 +1602,26 @@ export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClear
               try {
                 const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
                 if (userDoc.exists()) {
-                  const goals = userDoc.data().preferences?.studyGoals;
-                  if (goals) {
-                    systemInstruction += "\n\nAdapt your teaching style based on the user's saved study goals:";
-                    if (goals.improveUnderstanding) systemInstruction += "\n- Provide deeper explanations, step-by-step guidance, and ensure clarity.";
-                    if (goals.stayConsistent) systemInstruction += "\n- Be encouraging, send short reminders of progress, and motivate daily consistency.";
-                    if (goals.shortSessions) systemInstruction += "\n- Give brief, to-the-point answers formatted for quick learning sessions.";
+                  const data = userDoc.data();
+                  // Check new profile path first
+                  let goals = data.profile?.studyGoals;
+                  // If array (new format)
+                  if (goals && Array.isArray(goals.goals)) {
+                     const goalList = goals.goals;
+                     if (goalList.length > 0) {
+                        systemInstruction += "\n\nAdapt your teaching style based on these goals:";
+                        if (goalList.includes('Improve understanding')) systemInstruction += "\n- Provide deeper explanations, step-by-step guidance.";
+                        if (goalList.includes('Stay consistent')) systemInstruction += "\n- Be encouraging, motivate daily consistency.";
+                        if (goalList.includes('Learn in short sessions')) systemInstruction += "\n- Give brief, to-the-point answers.";
+                     }
+                  } else {
+                     // Check legacy format
+                     goals = data.preferences?.studyGoals;
+                     if (goals) {
+                        if (goals.improveUnderstanding) systemInstruction += "\n- Provide deeper explanations.";
+                        if (goals.stayConsistent) systemInstruction += "\n- Be encouraging.";
+                        if (goals.shortSessions) systemInstruction += "\n- Give brief answers.";
+                     }
                   }
                 }
               } catch (e) {
