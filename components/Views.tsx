@@ -27,7 +27,6 @@ import {
   deleteDoc 
 } from 'firebase/firestore';
 import { Activity } from '../App';
-// VeoCreator import removed as it is no longer used in LumaLearnView
 
 // --- Shared Components ---
 
@@ -840,18 +839,24 @@ interface ProfileViewProps {
   onLogout: () => void;
 }
 
-type ModalType = 'NONE' | 'REGION' | 'EMAIL' | 'LINKED' | 'PASSWORD' | 'DELETE' | 'NAME' | 'EDUCATION' | 'SUBJECTS';
+type ModalType = 'NONE' | 'REGION' | 'EMAIL' | 'PASSWORD' | 'DELETE' | 'NAME' | 'EDUCATION' | 'SUBJECTS';
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
   const [activeModal, setActiveModal] = useState<ModalType>('NONE');
   const [region, setRegion] = useState('English (US)');
   const [email, setEmail] = useState('');
   const [newEmail, setNewEmail] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [educationLevel, setEducationLevel] = useState('');
   const [subjects, setSubjects] = useState<string[]>([]);
   
+  // Study Goals state
+  const [studyGoals, setStudyGoals] = useState({
+    improveUnderstanding: true,
+    stayConsistent: false,
+    shortSessions: true
+  });
+
   // Temp states for modals
   const [tempName, setTempName] = useState('');
   const [tempEducationLevel, setTempEducationLevel] = useState('');
@@ -891,7 +896,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.region) setRegion(data.region);
-            if (data.googleLinked !== undefined) setIsConnected(data.googleLinked);
             if (data.profile?.name) setDisplayName(data.profile.name);
             
             // Safe extraction of nested objects
@@ -900,6 +904,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
             // Robust array check
             if (Array.isArray(learningContext.subjects)) {
               setSubjects(learningContext.subjects);
+            }
+            
+            // Load Study Goals
+            if (data.preferences?.studyGoals) {
+               setStudyGoals(prev => ({...prev, ...data.preferences.studyGoals}));
             }
           } else {
              // Create default doc if missing to ensure future consistency
@@ -911,6 +920,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
                learningContext: { 
                  educationLevel: 'Undergraduate University Student',
                  subjects: ['Computer Science', 'Data Analysis', 'Design']
+               },
+               preferences: {
+                 studyGoals: {
+                   improveUnderstanding: true,
+                   stayConsistent: false,
+                   shortSessions: true
+                 }
                }
              };
              // Try to set defaults, but don't crash if offline
@@ -983,17 +999,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
       setLoading(false);
     }
   };
-
-  const handleToggleLinked = async () => {
-    const newState = !isConnected;
-    setIsConnected(newState);
+  
+  const handleToggleGoal = async (key: keyof typeof studyGoals) => {
+    const newVal = !studyGoals[key];
+    const newState = { ...studyGoals, [key]: newVal };
+    setStudyGoals(newState);
+    
     if (currentUser) {
       const userRef = doc(db, 'users', currentUser.uid);
       try {
-        await setDoc(userRef, { googleLinked: newState }, { merge: true });
-      } catch (e) {
-        console.error("Failed to toggle linked account", e);
-        setIsConnected(!newState); // Revert on failure
+        // Merge this specific preference update
+        await setDoc(userRef, {
+           preferences: { studyGoals: { [key]: newVal } }
+        }, { merge: true });
+      } catch (err) {
+        console.error("Error saving goal:", err);
       }
     }
   };
@@ -1229,17 +1249,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
                   <p className="text-xs text-gray-400 mb-4">Select goals to help our AI tailor your daily lesson plans.</p>
                   <div className="space-y-3">
                     {[
-                      { text: 'Improve understanding', checked: true },
-                      { text: 'Stay consistent', checked: false },
-                      { text: 'Learn in short sessions', checked: true },
-                    ].map((item, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        {item.checked 
-                          ? <CheckCircle className="text-mint-400 shrink-0" size={20} /> 
-                          : <Circle className="text-gray-300 shrink-0" size={20} />}
-                        <span className="text-gray-700 text-sm">{item.text}</span>
-                      </div>
-                    ))}
+                      { key: 'improveUnderstanding', text: 'Improve understanding' },
+                      { key: 'stayConsistent', text: 'Stay consistent' },
+                      { key: 'shortSessions', text: 'Learn in short sessions' },
+                    ].map((item, i) => {
+                      const isSelected = studyGoals[item.key as keyof typeof studyGoals];
+                      return (
+                        <div 
+                          key={i} 
+                          className="flex items-center gap-3 cursor-pointer group"
+                          onClick={() => handleToggleGoal(item.key as keyof typeof studyGoals)}
+                        >
+                          <div className={`transition-colors ${isSelected ? 'text-mint-400' : 'text-gray-300 group-hover:text-gray-400'}`}>
+                            {isSelected 
+                              ? <CheckCircle size={20} /> 
+                              : <Circle size={20} />
+                            }
+                          </div>
+                          <span className={`text-sm transition-colors ${isSelected ? 'text-gray-900 font-medium' : 'text-gray-700'}`}>
+                            {item.text}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
               </Card>
             </div>
@@ -1261,30 +1293,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
             <Card className="p-8">
               <h3 className="font-bold text-gray-800 mb-6">Account Information</h3>
               <div className="space-y-6">
-                <div className="flex justify-between items-center border-b border-gray-100 pb-4">
+                <div className="flex justify-between items-center">
                     <div>
                       <p className="text-xs text-gray-400 mb-1">Email Address</p>
                       <p className="text-gray-800 font-medium">{email}</p>
                     </div>
                     <button 
                       onClick={() => setActiveModal('EMAIL')}
-                      className="px-4 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold"
-                    >
-                      Edit
-                    </button>
-                </div>
-                <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">Linked Account</p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-800 font-medium">Google</span>
-                        {isConnected && (
-                          <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded">Connected</span>
-                        )}
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setActiveModal('LINKED')}
                       className="px-4 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold"
                     >
                       Edit
@@ -1512,32 +1527,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
         </div>
       </Modal>
 
-      {/* Linked Account Modal */}
-      <Modal isOpen={activeModal === 'LINKED'} onClose={closeModal} title="Linked Accounts">
-         <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
-                 <span className="font-bold text-gray-800">G</span>
-              </div>
-              <div>
-                <p className="font-semibold text-gray-800">Google</p>
-                <p className="text-xs text-gray-500">{isConnected ? 'Connected' : 'Not connected'}</p>
-              </div>
-            </div>
-            <button 
-              onClick={handleToggleLinked}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                isConnected ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-mint-100 text-mint-600 hover:bg-mint-200'
-              }`}
-            >
-              {isConnected ? 'Disconnect' : 'Connect'}
-            </button>
-         </div>
-         <div className="mt-6 flex justify-end">
-            <Button variant="ghost" onClick={closeModal}>Done</Button>
-         </div>
-      </Modal>
-
       {/* Password Modal */}
       <Modal isOpen={activeModal === 'PASSWORD'} onClose={closeModal} title="Change Password">
         <div className="space-y-4">
@@ -1626,11 +1615,30 @@ export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClear
   useEffect(() => {
     const initChat = async () => {
         try {
+            let systemInstruction = "You are Luma, an intelligent, encouraging, and helpful AI tutor for students. Your goal is to help students learn complex topics by breaking them down into simple, understandable chunks. You should adapt to the student's learning style. Be concise but thorough.";
+
+            if (auth.currentUser) {
+              try {
+                const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+                if (userDoc.exists()) {
+                  const goals = userDoc.data().preferences?.studyGoals;
+                  if (goals) {
+                    systemInstruction += "\n\nAdapt your teaching style based on the user's saved study goals:";
+                    if (goals.improveUnderstanding) systemInstruction += "\n- Provide deeper explanations, step-by-step guidance, and ensure clarity.";
+                    if (goals.stayConsistent) systemInstruction += "\n- Be encouraging, send short reminders of progress, and motivate daily consistency.";
+                    if (goals.shortSessions) systemInstruction += "\n- Give brief, to-the-point answers formatted for quick learning sessions.";
+                  }
+                }
+              } catch (e) {
+                console.error("Error fetching user prefs for chat", e);
+              }
+            }
+
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             chatSessionRef.current = ai.chats.create({
                 model: 'gemini-2.5-flash',
                 config: {
-                    systemInstruction: "You are Luma, an intelligent, encouraging, and helpful AI tutor for students. Your goal is to help students learn complex topics by breaking them down into simple, understandable chunks. You should adapt to the student's learning style. Be concise but thorough.",
+                    systemInstruction: systemInstruction,
                 }
             });
 
