@@ -27,7 +27,7 @@ import {
   deleteDoc 
 } from 'firebase/firestore';
 import { Activity } from '../App';
-import VeoCreator from './VeoCreator';
+// VeoCreator import removed as it is no longer used in LumaLearnView
 
 // --- Shared Components ---
 
@@ -1599,14 +1599,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout }) => {
   );
 };
 
-// --- Luma Learn View ---
-
-interface LumaLearnProps {
-  initialPrompt: string;
-  onClearPrompt: () => void;
-  onAddActivity: (topic: string) => void;
-}
-
 interface ChatMessage {
   id: string;
   role: 'user' | 'model';
@@ -1614,8 +1606,13 @@ interface ChatMessage {
   timestamp: Date;
 }
 
+interface LumaLearnProps {
+  initialPrompt: string;
+  onClearPrompt: () => void;
+  onAddActivity: (topic: string) => void;
+}
+
 export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClearPrompt, onAddActivity }) => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'video'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -1624,7 +1621,7 @@ export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClear
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activeTab]);
+  }, [messages]);
 
   useEffect(() => {
     const initChat = async () => {
@@ -1709,26 +1706,10 @@ export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClear
   };
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col animate-in fade-in duration-500">
+    <div className="h-[calc(100vh-6rem)] flex flex-col animate-in fade-in duration-500">
         <SectionTitle title="Luma AI Tutor" subtitle="Chat with your personal learning assistant." />
         
-        <div className="flex bg-white rounded-xl p-1 w-fit shadow-sm border border-gray-100 mb-4">
-          <button 
-            onClick={() => setActiveTab('chat')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'chat' ? 'bg-mint-100 text-mint-700' : 'text-gray-500 hover:bg-gray-50'}`}
-          >
-            Chat Tutor
-          </button>
-          <button 
-            onClick={() => setActiveTab('video')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'video' ? 'bg-mint-100 text-mint-700' : 'text-gray-500 hover:bg-gray-50'}`}
-          >
-            Video Studio
-          </button>
-       </div>
-
-       {activeTab === 'chat' ? (
-          <Card className="flex-1 flex flex-col overflow-hidden shadow-lg border-mint-100/50">
+        <Card className="flex-1 flex flex-col overflow-hidden shadow-lg border-mint-100/50">
             <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-white to-gray-50/50">
                 {messages.map((msg) => (
                     <div 
@@ -1770,7 +1751,7 @@ export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClear
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(input)}
-                        placeholder="Ask anything (e.g., 'Explain Photosynthesis')..."
+                        placeholder="Ask away… I don’t judge 👀"
                         className="flex-1 p-3.5 bg-gray-50 border-transparent focus:bg-white focus:border-mint-300 border rounded-xl outline-none transition-all text-gray-700 placeholder-gray-400"
                     />
                     <button 
@@ -1781,14 +1762,11 @@ export const LumaLearnView: React.FC<LumaLearnProps> = ({ initialPrompt, onClear
                         <Send size={20} />
                     </button>
                 </div>
-                <p className="text-center text-xs text-gray-400 mt-3">Luma can make mistakes. Check important info.</p>
+                <p className="text-center text-xs text-gray-400 mt-3 font-medium opacity-80 flex items-center justify-center gap-1">
+                  Your brain + me = power combo ⚡️
+                </p>
             </div>
-          </Card>
-       ) : (
-          <div className="flex-1 overflow-y-auto">
-             <VeoCreator />
-          </div>
-       )}
+        </Card>
     </div>
   );
 };
