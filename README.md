@@ -49,9 +49,6 @@ Lumina Learn relies on the Gemini API as its central intelligence layer, enablin
 - **AI Engine:** Google Gemini API  
 - **Storage:** Firebase 
 
-## Configure environment variables:
-
-GEMINI_API_KEY=AIzaSyDCExvvrW2XTCRV-v5M4srcL7Vs1Bw0_VE
 
 
 ## Use Cases
